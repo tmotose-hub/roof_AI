@@ -1,0 +1,7 @@
+__pycache__/
+
+*.pyc
+
+output/
+
+runs/segment/train-2/weights/last.pt
