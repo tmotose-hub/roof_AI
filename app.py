@@ -13,10 +13,22 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 
 # ==========================================
-# ③ 日本語フォント登録 (Windows用)
+# 日本語フォント登録（Render対応）
 # ==========================================
-font_path = "C:/Windows/Fonts/meiryo.ttc"
-pdfmetrics.registerFont(TTFont("Meiryo", font_path))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+font_path = os.path.join(
+    BASE_DIR,
+    "fonts",
+    "NotoSansJP-Regular.ttf"
+)
+
+pdfmetrics.registerFont(
+    TTFont(
+        "NotoJP",
+        font_path
+    )
+)
 
 # YOLOモデルの読み込み
 model = YOLO("runs/segment/train-2/weights/best.pt")
@@ -38,17 +50,17 @@ def create_diagnostic_pdf(output_path, moss_ratio, score, rank, comment, roof_ar
     # 日本語用カスタムスタイルの追加
     title_style = ParagraphStyle(
         'DocTitle', parent=styles['Heading1'], 
-        fontName='Meiryo', fontSize=24, leading=28, 
+        fontName='NotoJP', fontSize=24, leading=28, 
         alignment=1, spaceAfter=20
     )
     h2_style = ParagraphStyle(
         'SectionHeader', parent=styles['Heading2'], 
-        fontName='Meiryo', fontSize=14, leading=18, 
+        fontName='NotoJP', fontSize=14, leading=18, 
         spaceBefore=15, spaceAfter=10, textColor=colors.HexColor("#1A365D")
     )
     body_style = ParagraphStyle(
         'BodyTextCustom', parent=styles['Normal'], 
-        fontName='Meiryo', fontSize=10, leading=15, spaceAfter=8
+        fontName='NotoJP', fontSize=10, leading=15, spaceAfter=8
     )
     
     story = []
