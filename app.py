@@ -1,4 +1,3 @@
-from report import create_report
 import os
 import tempfile
 from PIL import Image
@@ -30,8 +29,14 @@ pdfmetrics.registerFont(
     )
 )
 
-# YOLOモデルの読み込み
-model = YOLO("runs/segment/train-2/weights/best.pt")
+# ==========================================
+# YOLOモデル（1回だけ読み込む）
+# ==========================================
+@st.cache_resource
+def load_model():
+    return YOLO("runs/segment/train-2/weights/best.pt")
+
+model = load_model()
 
 # ==========================================
 # ④ PDF作成関数
@@ -99,9 +104,9 @@ def create_diagnostic_pdf(output_path, moss_ratio, score, rank, comment, roof_ar
     story.append(Paragraph("■ AIアドバイス・推奨施工", h2_style))
     story.append(Paragraph(comment, body_style))
     
-    if rank == "重度":
+    if "重度" in rank:
         story.append(Paragraph("【推奨施工】高圧洗浄、および屋根全体への防カビ・遮熱塗装（早期実施を推奨）", body_style))
-    elif rank == "中度":
+    elif "中度" in rank:
         story.append(Paragraph("【推奨施工】部分的な高圧洗浄、または防カビ処理を検討してください。", body_style))
     else:
         story.append(Paragraph("【推奨施工】現時点での特別な施工は不要です。定期的な点検を継続してください。", body_style))
@@ -124,19 +129,39 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file:
     image = Image.open(uploaded_file)
+    image = image.convert("RGB")
+
+    # Render Free高速化
+    image.thumbnail((512, 512))
     
     col1, col2 = st.columns(2)
     with col1:
-        st.image(image, caption="アップロード画像", use_container_width=True)
+        st.image(image,caption="アップロード画像",width="stretch")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-        image.save(tmp.name)
-        results = model.predict(source=tmp.name, conf=0.25)
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            image.save(tmp.name)
+
+
+            results = model.predict(
+                source=tmp.name,
+                conf=0.35,
+                imgsz=512,
+                verbose=False
+            )
+
+    finally:
+        if os.path.exists(tmp.name):
+            os.remove(tmp.name)
 
     result_img = results[0].plot()
     
     with col2:
-        st.image(result_img, caption="AI解析・コケ検出結果", use_container_width=True)
+        st.image(
+            result_img,
+            caption="AI解析・コケ検出結果",
+            width="stretch"
+        )
 
     if results[0].masks is not None:
         # STEP1: 重複マスクを除去して正確な画素数を計算
