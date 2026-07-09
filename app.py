@@ -132,7 +132,7 @@ if uploaded_file:
     image = image.convert("RGB")
 
     # Render Free高速化
-    image.thumbnail((512, 512))
+    image.thumbnail((320, 320))
     
     col1, col2 = st.columns(2)
     with col1:
@@ -142,26 +142,30 @@ if uploaded_file:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             image.save(tmp.name)
 
+            st.write("① 推論開始")
 
             results = model.predict(
                 source=tmp.name,
-                conf=0.35,
-                imgsz=512,
+                conf=0.5,
+                imgsz=320,
                 verbose=False
             )
 
+            st.write("② 推論終了")
     finally:
         if os.path.exists(tmp.name):
             os.remove(tmp.name)
 
-    result_img = results[0].plot()
+   # result_img = results[0].plot()
     
-    with col2:
-        st.image(
-            result_img,
-            caption="AI解析・コケ検出結果",
-            width="stretch"
-        )
+    #with col2:
+    #    st.image(
+    #        result_img,
+    #        caption="AI解析・コケ検出結果",
+    #        width="stretch"
+    #    )
+
+    st.success("AI解析成功")
 
     if results[0].masks is not None:
         # STEP1: 重複マスクを除去して正確な画素数を計算
