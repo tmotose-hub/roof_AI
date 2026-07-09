@@ -1,240 +1,180 @@
-import os
-import tempfile
-from PIL import Image
-import numpy as np
-import streamlit as st
 from ultralytics import YOLO
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib import colors
+import streamlit as st
+from PIL import Image
+import tempfile
+import numpy as np
 
-# ==========================================
-# 日本語フォント登録（Render対応）
-# ==========================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ==========================
+# モデル読み込み
+# ==========================
+model = YOLO("runs/segment/train-2/weights/best.pt")
 
-font_path = os.path.join(
-    BASE_DIR,
-    "fonts",
-    "NotoSansJP-Regular.ttf"
-)
+st.set_page_config(page_title="屋根コケ診断AI", layout="wide")
 
-pdfmetrics.registerFont(
-    TTFont(
-        "NotoJP",
-        font_path
-    )
-)
-
-# ==========================================
-# YOLOモデル（1回だけ読み込む）
-# ==========================================
-@st.cache_resource
-def load_model():
-    return YOLO("runs/segment/train-2/weights/best.pt")
-
-model = load_model()
-
-# ==========================================
-# ④ PDF作成関数
-# ==========================================
-def create_diagnostic_pdf(output_path, moss_ratio, score, rank, comment, roof_area, moss_area, cost_min, cost_max):
-    # A4サイズ・上下左右20mmのマージンでドキュメントを作成
-    doc = SimpleDocTemplate(
-        output_path, 
-        pagesize=A4,
-        leftMargin=56.7, rightMargin=56.7, 
-        topMargin=56.7, bottomMargin=56.7
-    )
-    
-    styles = getSampleStyleSheet()
-    
-    # 日本語用カスタムスタイルの追加
-    title_style = ParagraphStyle(
-        'DocTitle', parent=styles['Heading1'], 
-        fontName='NotoJP', fontSize=24, leading=28, 
-        alignment=1, spaceAfter=20
-    )
-    h2_style = ParagraphStyle(
-        'SectionHeader', parent=styles['Heading2'], 
-        fontName='NotoJP', fontSize=14, leading=18, 
-        spaceBefore=15, spaceAfter=10, textColor=colors.HexColor("#1A365D")
-    )
-    body_style = ParagraphStyle(
-        'BodyTextCustom', parent=styles['Normal'], 
-        fontName='NotoJP', fontSize=10, leading=15, spaceAfter=8
-    )
-    
-    story = []
-    
-    # タイトル
-    story.append(Paragraph("屋根AI診断レポート", title_style))
-    story.append(Spacer(1, 15))
-    
-    # 診断結果まとめデータテーブル
-    data = [
-        [Paragraph("<b>項目</b>", body_style), Paragraph("<b>診断結果</b>", body_style)],
-        [Paragraph("屋根面積", body_style), Paragraph(f"{roof_area:.1f} ㎡", body_style)],
-        [Paragraph("コケ検出率", body_style), Paragraph(f"{moss_ratio:.1f} %", body_style)],
-        [Paragraph("コケ推定面積", body_style), Paragraph(f"{moss_area:.1f} ㎡", body_style)],
-        [Paragraph("劣化スコア", body_style), Paragraph(f"{score:.0f} 点", body_style)],
-        [Paragraph("診断ランク", body_style), Paragraph(f"{rank}", body_style)],
-        [Paragraph("概算メンテナンス費用", body_style), Paragraph(f"{cost_min:,}円 ～ {cost_max:,}円", body_style)]
-    ]
-    
-    t = Table(data, colWidths=[150, 250])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (1,0), colors.HexColor("#1A365D")),
-        ('TEXTCOLOR', (0,0), (1,0), colors.whitesmoke),
-        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-        ('TOPPADDING', (0,0), (-1,-1), 8),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#F7FAFC")),
-    ]))
-    
-    story.append(Paragraph("■ 診断概要", h2_style))
-    story.append(t)
-    story.append(Spacer(1, 15))
-    
-    # AI診断コメント
-    story.append(Paragraph("■ AIアドバイス・推奨施工", h2_style))
-    story.append(Paragraph(comment, body_style))
-    
-    if "重度" in rank:
-        story.append(Paragraph("【推奨施工】高圧洗浄、および屋根全体への防カビ・遮熱塗装（早期実施を推奨）", body_style))
-    elif "中度" in rank:
-        story.append(Paragraph("【推奨施工】部分的な高圧洗浄、または防カビ処理を検討してください。", body_style))
-    else:
-        story.append(Paragraph("【推奨施工】現時点での特別な施工は不要です。定期的な点検を継続してください。", body_style))
-        
-    doc.build(story)
-
-# ==========================================
-# ⑥ Streamlit メイン画面構成
-# ==========================================
-st.title("屋根コケ診断AI — プロ仕様 Ver 2.0")
-
-# ⑤ 顧客向け設定・前提条件の入力
-st.sidebar.header("診断前提条件の設定")
-roof_area = st.sidebar.number_input("屋根の総面積 (㎡)", min_value=1.0, value=120.0, step=1.0)
-unit_price = st.sidebar.number_input("㎡あたりの想定洗浄・塗装単価 (円)", min_value=500, value=2500, step=100)
+st.title("🏠 屋根コケ診断AI")
 
 uploaded_file = st.file_uploader(
-    "屋根画像をアップロードしてください", type=["jpg", "jpeg", "png"]
+    "屋根画像をアップロードしてください",
+    type=["jpg", "jpeg", "png"]
 )
 
-if uploaded_file:
+if uploaded_file is not None:
+
+    # ------------------------
+    # 元画像表示
+    # ------------------------
     image = Image.open(uploaded_file)
-    image = image.convert("RGB")
 
-    # Render Free高速化
-    image.thumbnail((320, 320))
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.image(image,caption="アップロード画像",width="stretch")
+    st.subheader("アップロード画像")
 
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-            image.save(tmp.name)
+    st.image(image, use_container_width=True)
 
-            st.write("① 推論開始")
+    # ------------------------
+    # 一時保存
+    # ------------------------
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
 
-            results = model.predict(
-                source=tmp.name,
-                conf=0.5,
-                imgsz=320,
-                verbose=False
-            )
+        image.save(tmp.name)
 
-            st.write("② 推論終了")
-    finally:
-        if os.path.exists(tmp.name):
-            os.remove(tmp.name)
+        results = model.predict(
+            source=tmp.name,
+            conf=0.25
+        )
 
-   # result_img = results[0].plot()
-    
-    #with col2:
-    #    st.image(
-    #        result_img,
-    #        caption="AI解析・コケ検出結果",
-    #        width="stretch"
-    #    )
+    # ------------------------
+    # AI結果画像
+    # ------------------------
+    result_img = results[0].plot()
 
-    st.success("AI解析成功")
+    st.subheader("AI診断結果")
 
+    st.image(result_img, use_container_width=True)
+
+    # ------------------------
+    # コケ率計算
+    # ------------------------
     if results[0].masks is not None:
-        # STEP1: 重複マスクを除去して正確な画素数を計算
+
         masks = results[0].masks.data.cpu().numpy()
+
+        # 重複マスク除去
         merged_mask = np.any(masks, axis=0)
+
         moss_pixels = np.sum(merged_mask)
+
         image_pixels = merged_mask.shape[0] * merged_mask.shape[1]
 
-        # コケ率の計算
-        moss_ratio = (moss_pixels / image_pixels) * 100
-        
-        # ⑤ ㎡換算 & 劣化スコア計算
-        moss_area = roof_area * (moss_ratio / 100)
+        moss_ratio = moss_pixels / image_pixels * 100
+
+        # ------------------------
+        # 劣化スコア
+        # ------------------------
         score = max(0, 100 - moss_ratio)
-        
-        # ⑤ 想定費用の算出 (コケの面積、または最低基本料金などをベースにした概算)
-        cost_min = int(moss_area * unit_price)
-        cost_max = int(moss_area * (unit_price + 1200)) # 上幅をもたせる計算
-        if cost_min < 30000 and moss_ratio > 0: # 最低施工費用を3万円にセット
-            cost_min = 30000
-            cost_max = 60000
 
-        # 結果表示
-        st.markdown("---")
-        st.subheader("📊 診断アナリティクス")
-        
-        m_col1, m_col2, m_col3 = st.columns(3)
-        m_col1.metric("AI判定 コケ率", f"{moss_ratio:.1f} %")
-        m_col2.metric("コケ推定面積", f"{moss_area:.1f} ㎡")
-        m_col3.metric("屋根総合健康スコア", f"{score:.0f} 点")
+        st.divider()
 
-        # STEP3: 判定ランク & コメント
-        if moss_ratio < 10:
-            rank = "軽度 (Aランク)"
-            comment = "状態は非常に良好です。現時点では屋根材自体の大きな劣化は見られません。定期的なメンテナンスチェックをお勧めします。"
-            st.success(f"判定: {rank}")
-        elif moss_ratio < 30:
-            rank = "中度 (Bランク)"
-            comment = "一部に広がりつつあるコケ・藻の群生が確認されました。これ以上の拡大を防ぐため、高圧洗浄や防カビ施工を計画することをお勧めします。"
-            st.warning(f"判定: {rank}")
+        st.subheader(f"🟢 コケ率：{moss_ratio:.1f}%")
+
+        st.metric(
+            "劣化スコア",
+            f"{score:.0f}点"
+        )
+
+        st.progress(score / 100)
+
+        # ------------------------
+        # ランク判定
+        # ------------------------
+
+        if score >= 95:
+
+            rank = "A"
+
+            st.success("★★★★★ 非常に良好")
+
+        elif score >= 85:
+
+            rank = "B"
+
+            st.info("★★★★☆ 良好")
+
+        elif score >= 70:
+
+            rank = "C"
+
+            st.warning("★★★☆☆ 軽度劣化")
+
+        elif score >= 50:
+
+            rank = "D"
+
+            st.warning("★★☆☆☆ 中度劣化")
+
         else:
-            rank = "重度 (Cランク)"
-            comment = "広範囲にわたる深刻なコケの付着が確認されました。水分の滞留により屋根材本体の耐久性が低下している危険性があります。専門業者による早期の洗浄および補修塗装を強く推奨します。"
-            st.error(f"判定: {rank}")
 
-        # ⑤ お客様向け診断レポートビュー
-        st.info(f"【AI診断アドバイス】\n{comment}")
-        
-        st.markdown("### 💰 推奨されるメンテナンスプラン")
-        st.write(f"・**推奨施工:** {'定期点検継続' if moss_ratio < 10 else 'バイオ高圧洗浄 / 屋根塗装'}")
-        st.write(f"・**概算提案費用:** 約 **{cost_min:,}円 ～ {cost_max:,}円** (面積、単価連動)")
+            rank = "E"
 
-        # ⑤ PDFダウンロードボタン（ワンクリック作成）
-        st.markdown("---")
-        st.subheader("📄 顧客提出用PDFレポート出力")
-        
-        pdf_filename = "屋根AI診断報告書.pdf"
-        if st.button("PDF診断書を生成する"):
-            create_diagnostic_pdf(
-                pdf_filename, moss_ratio, score, rank, comment, 
-                roof_area, moss_area, cost_min, cost_max
-            )
-            
-            with open(pdf_filename, "rb") as f:
-                st.download_button(
-                    label="📥 PDFをダウンロード",
-                    data=f,
-                    file_name=pdf_filename,
-                    mime="application/pdf"
-                )
+            st.error("★☆☆☆☆ 重度劣化")
+
+        st.subheader(f"診断ランク：{rank}")
+
+        # ------------------------
+        # AIコメント
+        # ------------------------
+
+        st.divider()
+
+        st.subheader("🤖 AI診断コメント")
+
+        if moss_ratio < 5:
+
+            st.success("""
+屋根の状態は非常に良好です。
+
+現時点で洗浄の必要性は低く、
+半年〜1年後の再点検を推奨します。
+""")
+
+        elif moss_ratio < 15:
+
+            st.info("""
+軽度のコケが確認されました。
+
+今後徐々に増殖する可能性があります。
+
+1年以内の点検を推奨します。
+""")
+
+        elif moss_ratio < 30:
+
+            st.warning("""
+コケが確認されました。
+
+屋根材の保水が始まっている可能性があります。
+
+高圧洗浄や防カビ施工をご検討ください。
+""")
+
+        elif moss_ratio < 50:
+
+            st.warning("""
+コケの繁殖範囲が広がっています。
+
+屋根材の劣化が進行している可能性があります。
+
+専門業者による点検を推奨します。
+""")
+
+        else:
+
+            st.error("""
+広範囲にコケが発生しています。
+
+屋根材の劣化や防水性能の低下が考えられます。
+
+早急な点検・洗浄・補修をご検討ください。
+""")
+
     else:
-        st.success("コケは検出されませんでした！屋根は非常にクリーンな状態です。")
+
+        st.success("コケは検出されませんでした。")
